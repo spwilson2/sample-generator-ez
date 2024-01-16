@@ -173,6 +173,12 @@ class DemoCallback(pl.Callback):
 
             # Put the demos together
             fakes = rearrange(fakes, 'b d n -> d (b n)')
+            # Fade between the demos (to cleanup clicks)
+            fade_len = int(self.sample_rate*0.005)
+            fade = torchaudio.transforms.Fade(
+                fade_in_len=fade_len, 
+                fade_out_len=fade_len, fade_shape="exponential")
+            fakes = fade(fakes)
 
             log_dict = {}
             

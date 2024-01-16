@@ -148,9 +148,14 @@ def generate_from_noise(model_fn,
 
     generated = sample(model_fn, noise, steps, sampler_type)
 
-    # Hard-clip the generated audio
-    generated_all = rearrange(generated, 'b d n -> d (b n)')
-    generated = generated.clamp(-1, 1).mul(32767).to(torch.int16).cpu()
+    # Hard-clip the generated audio, fade between clips in the merged output
+    fade_len = int(args.sample_rate*0.005)
+    fade = torchaudio.transforms.Fade(
+        fade_in_len=fade_len, 
+        fade_out_len=fade_len, fade_shape="exponential")
+    faded = fade(generated)
+    generated_all = rearrange(faded, 'b d n -> d (b n)')
+    generated = faded.clamp(-1, 1).mul(32767).to(torch.int16).cpu()
     return (generated, generated_all.clamp(-1, 1).mul(32767).to(torch.int16).cpu())
 
     # Put the demos together
