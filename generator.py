@@ -140,7 +140,6 @@ def generate_from_noise(model_fn,
                         batch_size=4,
                         steps=100,
                         sample_length_mult=1):
-    steps = 150 #@param {type:"number"}
 
     effective_length = sample_length_mult * args.sample_size
 
@@ -150,25 +149,33 @@ def generate_from_noise(model_fn,
     generated = sample(model_fn, noise, steps, sampler_type)
 
     # Hard-clip the generated audio
-    generated = generated.clamp(-1, 1)
+    generated_all = rearrange(generated, 'b d n -> d (b n)')
+    generated = generated.clamp(-1, 1).mul(32767).to(torch.int16).cpu()
+    return (generated, generated_all.clamp(-1, 1).mul(32767).to(torch.int16).cpu())
 
     # Put the demos together
-    generated_all = rearrange(generated, 'b d n -> d (b n)')
-    generated_all = generated_all.clamp(-1, 1).mul(32767).to(torch.int16).cpu()
-    return generated_all
+    #generated_all = rearrange(generated, 'b d n -> d (b n)')
+    #generated_all = generated_all.clamp(-1, 1).mul(32767).to(torch.int16).cpu()
+    #return generated_all
 
 # Delete non-ema
 del model.diffusion
 def generate_once(idx):
     try:
-        generated_all = generate_from_noise(
+        (generated, gen_all) = generate_from_noise(
             model_fn=model.diffusion_ema, 
             steps=args.demo_steps,
             sample_length_mult=args.sample_length_mult,
             batch_size=args.batch_size)
-        filename = f'generated-{idx}.wav'
+        
+        filename = f'{args.name}-sum-{idx}.wav'
         filepath = os.path.join(args.sample_output_dir, filename)
-        torchaudio.save(filepath, generated_all, args.sample_rate)
+        torchaudio.save(filepath, gen_all, args.sample_rate)
+        for sidx, sample in enumerate(generated):
+            filename = f'{args.name}-{idx}_{sidx}.wav'
+            filepath = os.path.join(args.sample_output_dir, filename)
+            torchaudio.save(filepath, sample, args.sample_rate)
+        #torchaudio.save(filepath, generated_all, args.sample_rate)
     except KeyboardInterrupt:
         input('Press enter to goto next loop, or ctlr-c to quit.')
 
