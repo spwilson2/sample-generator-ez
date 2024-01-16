@@ -147,12 +147,20 @@ class DemoCallback(pl.Callback):
         self.demo_steps = global_args.demo_steps
         self.sample_rate = global_args.sample_rate
         self.last_demo_step = -1
+        self._init = 0
+        self._run_name = global_args.name
 
     @rank_zero_only
     @torch.no_grad()
     #def on_train_epoch_end(self, trainer, module):
-    def on_train_batch_end(self, trainer, module, outputs, batch, batch_idx):        
+    def on_train_batch_end(self, trainer, module, outputs, batch, batch_idx):
   
+        # Skip first demo
+        #if self._init == 0:
+        #    self._init = 1
+        #    self.last_demo_step = trainer.global_step
+        #    return
+
         if (trainer.global_step - 1) % self.demo_every != 0 or self.last_demo_step == trainer.global_step:
             return
         
@@ -168,9 +176,13 @@ class DemoCallback(pl.Callback):
 
             log_dict = {}
             
-            filename = f'demo_{trainer.global_step:08}.wav'
+            filename = f'demo_{self._run_name}_{trainer.global_step:08}.wav'
             fakes = fakes.clamp(-1, 1).mul(32767).to(torch.int16).cpu()
             torchaudio.save(filename, fakes, self.sample_rate)
+
+            from desktop_notifier import DesktopNotifier
+            notifier = DesktopNotifier()
+            notifier.send_sync(title="Sample Generator", message=f"New demo generated: {filename}")
 
 
             log_dict[f'demo'] = wandb.Audio(filename,
@@ -190,15 +202,19 @@ def main():
     args.latent_dim = 0
 
     save_path = None if args.save_path == "" else args.save_path
+    from desktop_notifier import DesktopNotifier
+    notifier = DesktopNotifier()
+    notifier.send_sync(title="Sample Generator", message=f"Notifications enabled for {args.name}")
 
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    #device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    device = torch.device('mps')
     print('Using device:', device)
     torch.manual_seed(args.seed)
 
     train_set = SampleDataset([args.training_dir], args)
     train_dl = data.DataLoader(train_set, args.batch_size, shuffle=True,
                                num_workers=args.num_workers, persistent_workers=True, pin_memory=True, drop_last=True)
-    wandb_logger = pl.loggers.WandbLogger(project=args.name, log_model='all' if args.save_wandb=='all' else None)
+    #wandb_logger = pl.loggers.WandbLogger(project=args.name, log_model='all' if args.save_wandb=='all' else None)
 
     exc_callback = ExceptionCallback()
     ckpt_callback = pl.callbacks.ModelCheckpoint(every_n_train_steps=args.checkpoint_every, save_top_k=-1, dirpath=save_path)
@@ -206,8 +222,8 @@ def main():
 
     diffusion_model = DiffusionUncond(args)
 
-    wandb_logger.watch(diffusion_model)
-    push_wandb_config(wandb_logger, args)
+    #wandb_logger.watch(diffusion_model)
+    #push_wandb_config(wandb_logger, args)
 
     diffusion_trainer = pl.Trainer(
         devices=args.num_gpus,
@@ -217,8 +233,8 @@ def main():
         precision=16,
         accumulate_grad_batches=args.accum_batches, 
         callbacks=[ckpt_callback, demo_callback, exc_callback],
-        logger=wandb_logger,
-        log_every_n_steps=1,
+        #logger=wandb_logger,
+        #log_every_n_steps=10,
         max_epochs=10000000,
     )
 
